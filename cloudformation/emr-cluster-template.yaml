@@ -1,0 +1,596 @@
+# emr-cluster-template.yaml
+# AWS CloudFormation template for EMR cluster used in Kryo serialization benchmark
+# Deploys a 9-node m5.4xlarge cluster with Spark 3.4.1
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "EMR Cluster for Kryo Serialization Optimization Benchmark - TPC-DS at 100GB scale"
+
+# Parameters
+Parameters:
+  ClusterName:
+    Type: String
+    Default: "kryo-benchmark-cluster"
+    Description: "Name of the EMR cluster"
+    MinLength: 1
+    MaxLength: 256
+    
+  EmrRelease:
+    Type: String
+    Default: "emr-6.15.0"
+    AllowedValues:
+      - "emr-6.15.0"
+      - "emr-6.14.0"
+      - "emr-6.13.0"
+    Description: "EMR release version (6.15.0 = Spark 3.4.1)"
+    
+  MasterInstanceType:
+    Type: String
+    Default: "m5.4xlarge"
+    AllowedValues:
+      - "m5.4xlarge"
+      - "m5a.4xlarge"
+      - "m5n.4xlarge"
+    Description: "EC2 instance type for master node"
+    
+  WorkerInstanceType:
+    Type: String
+    Default: "m5.4xlarge"
+    AllowedValues:
+      - "m5.4xlarge"
+      - "m5a.4xlarge"
+      - "m5n.4xlarge"
+      - "r5.4xlarge"
+    Description: "EC2 instance type for worker nodes"
+    
+  WorkerCount:
+    Type: Number
+    Default: 8
+    MinValue: 1
+    MaxValue: 50
+    Description: "Number of worker nodes (default 8 for 9-node total)"
+    
+  Ec2KeyName:
+    Type: "AWS::EC2::KeyPair::KeyName"
+    Description: "Name of an existing EC2 KeyPair for SSH access"
+    
+  SubnetId:
+    Type: "AWS::EC2::Subnet::Id"
+    Description: "Subnet ID for cluster deployment"
+    
+  S3LogBucket:
+    Type: String
+    Description: "S3 bucket for logs (e.g., s3://my-bucket/emr-logs/)"
+    Default: ""
+    
+  S3DataBucket:
+    Type: String
+    Description: "S3 bucket for TPC-DS data (e.g., s3://my-bucket/tpcds/)"
+    
+  UseSpotInstances:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: "Use spot instances for worker nodes (reduces cost ~70%)"
+    
+  SpotBidPercentage:
+    Type: Number
+    Default: 100
+    MinValue: 0
+    MaxValue: 100
+    Description: "Bid percentage for spot instances (100% = on-demand price)"
+
+# Resources
+Resources:
+  # EMR Cluster
+  EMRCluster:
+    Type: "AWS::EMR::Cluster"
+    Properties:
+      Name: !Ref ClusterName
+      ReleaseLabel: !Ref EmrRelease
+      LogUri: !Ref S3LogBucket
+      Applications:
+        - Name: "Spark"
+        - Name: "Hive"
+        - Name: "Hadoop"
+        - Name: "Tez"
+        - Name: "Ganglia"
+        - Name: "Zeppelin"
+        
+      Configurations:
+        # Spark configuration
+        - Classification: "spark"
+          Properties:
+            maximizeResourceAllocation: "true"
+            
+        - Classification: "spark-defaults"
+          Properties:
+            spark.serializer: "org.apache.spark.serializer.KryoSerializer"
+            spark.kryoserializer.buffer.max: "512m"
+            spark.kryoserializer.buffer: "64m"
+            spark.kryo.registrationRequired: "false"
+            spark.kryo.referenceTracking: "false"
+            spark.kryo.unsafe: "true"
+            spark.executor.memory: "40g"
+            spark.executor.cores: "4"
+            spark.executor.instances: !Ref WorkerCount
+            spark.driver.memory: "50g"
+            spark.dynamicAllocation.enabled: "false"
+            spark.sql.shuffle.partitions: "400"
+            spark.sql.adaptive.enabled: "true"
+            spark.sql.adaptive.coalescePartitions.enabled: "true"
+            spark.sql.adaptive.advisoryPartitionSizeInBytes: "256MB"
+            spark.network.timeout: "800s"
+            spark.executor.heartbeatInterval: "60s"
+            
+        - Classification: "spark-env"
+          Configurations:
+            - Classification: "export"
+              Properties:
+                SPARK_DAEMON_MEMORY: "2g"
+                SPARK_WORKER_MEMORY: "40g"
+                SPARK_WORKER_CORES: "4"
+                
+        # Hive configuration for Glue Data Catalog
+        - Classification: "hive-site"
+          Properties:
+            hive.metastore.client.factory.class: "com.amazonaws.glue.catalog.metastore.AWSGlueDataCatalogHiveClientFactory"
+            hive.metastore.warehouse.dir: !Sub "${S3DataBucket}/warehouse/"
+            
+        # Hadoop configuration for S3
+        - Classification: "core-site"
+          Properties:
+            fs.s3a.impl: "org.apache.hadoop.fs.s3a.S3AFileSystem"
+            fs.s3a.connection.maximum: "100"
+            fs.s3a.fast.upload: "true"
+            fs.s3a.fast.upload.buffer: "disk"
+            fs.s3a.multipart.size: "100M"
+            
+        # HDFS configuration
+        - Classification: "hdfs-site"
+          Properties:
+            dfs.replication: "3"
+            dfs.blocksize: "134217728"
+            
+      Instances:
+        MasterInstanceGroup:
+          Name: "Master"
+          InstanceRole: "MASTER"
+          InstanceType: !Ref MasterInstanceType
+          InstanceCount: 1
+          Market: "ON_DEMAND"
+          EbsConfiguration:
+            EbsBlockDeviceConfigs:
+              - VolumeSpecification:
+                  VolumeType: "gp3"
+                  SizeInGB: 100
+                VolumesPerInstance: 1
+                
+        CoreInstanceGroup:
+          Name: "Core"
+          InstanceRole: "CORE"
+          InstanceType: !Ref WorkerInstanceType
+          InstanceCount: !Ref WorkerCount
+          Market: !If [UseSpotInstancesCondition, "SPOT", "ON_DEMAND"]
+          BidPrice: !If [UseSpotInstancesCondition, !Sub "${SpotBidPercentage}% of OnDemandPrice", ""]
+          EbsConfiguration:
+            EbsBlockDeviceConfigs:
+              - VolumeSpecification:
+                  VolumeType: "gp3"
+                  SizeInGB: 100
+                VolumesPerInstance: 1
+                
+      JobFlowRole: !Ref EmrEc2InstanceProfile
+      ServiceRole: !Ref EmrServiceRole
+      VisibleToAllUsers: true
+      Tags:
+        - Key: "Project"
+          Value: "KryoSerializationBenchmark"
+        - Key: "Environment"
+          Value: "Research"
+          
+  # IAM Roles
+  EmrServiceRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: "elasticmapreduce.amazonaws.com"
+            Action: "sts:AssumeRole"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AmazonElasticMapReduceRole"
+      Policies:
+        - PolicyName: "EMRPassRole"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action: "iam:PassRole"
+                Resource: "*"
+                
+  EmrEc2Role:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: "ec2.amazonaws.com"
+            Action: "sts:AssumeRole"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AmazonElasticMapReduceforEC2Role"
+        - "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+        - "arn:aws:iam::aws:policy/CloudWatchFullAccess"
+        
+  EmrEc2InstanceProfile:
+    Type: "AWS::IAM::InstanceProfile"
+    Properties:
+      Roles:
+        - !Ref EmrEc2Role
+        
+  # Security Group
+  EmrSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: "Security group for EMR cluster"
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: "tcp"
+          FromPort: 22
+          ToPort: 22
+          CidrIp: "0.0.0.0/0"
+          Description: "SSH access"
+        - IpProtocol: "tcp"
+          FromPort: 8088
+          ToPort: 8088
+          CidrIp: "0.0.0.0/0"
+          Description: "YARN ResourceManager UI"
+        - IpProtocol: "tcp"
+          FromPort: 4040
+          ToPort: 4040
+          CidrIp: "0.0.0.0/0"
+          Description: "Spark UI"
+        - IpProtocol: "tcp"
+          FromPort: 9090
+          ToPort: 9090
+          CidrIp: "0.0.0.0/0"
+          Description: "Prometheus metrics"
+        - IpProtocol: "tcp"
+          FromPort: 9092
+          ToPort: 9092
+          CidrIp: "0.0.0.0/0"
+          Description: "JMX metrics"
+
+# Conditions
+Conditions:
+  UseSpotInstancesCondition: !Equals [!Ref UseSpotInstances, "true"]
+
+# Outputs
+Outputs:
+  ClusterId:
+    Description: "EMR Cluster ID"
+    Value: !Ref EMRCluster
+    
+  ClusterMasterDNS:
+    Description: "Master node public DNS"
+    Value: !GetAtt EMRCluster.MasterPublicDNS
+    
+  SparkUI:
+    Description: "Spark UI URL"
+    Value: !Sub "http://${EMRCluster.MasterPublicDNS}:8088"
+    
+  JmxPort:
+    Description: "JMX metrics port"
+    Value: "9092"# emr-cluster-template.yaml
+# AWS CloudFormation template for EMR cluster used in Kryo serialization benchmark
+# Deploys a 9-node m5.4xlarge cluster with Spark 3.4.1
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "EMR Cluster for Kryo Serialization Optimization Benchmark - TPC-DS at 100GB scale"
+
+# Parameters
+Parameters:
+  ClusterName:
+    Type: String
+    Default: "kryo-benchmark-cluster"
+    Description: "Name of the EMR cluster"
+    MinLength: 1
+    MaxLength: 256
+    
+  EmrRelease:
+    Type: String
+    Default: "emr-6.15.0"
+    AllowedValues:
+      - "emr-6.15.0"
+      - "emr-6.14.0"
+      - "emr-6.13.0"
+    Description: "EMR release version (6.15.0 = Spark 3.4.1)"
+    
+  MasterInstanceType:
+    Type: String
+    Default: "m5.4xlarge"
+    AllowedValues:
+      - "m5.4xlarge"
+      - "m5a.4xlarge"
+      - "m5n.4xlarge"
+    Description: "EC2 instance type for master node"
+    
+  WorkerInstanceType:
+    Type: String
+    Default: "m5.4xlarge"
+    AllowedValues:
+      - "m5.4xlarge"
+      - "m5a.4xlarge"
+      - "m5n.4xlarge"
+      - "r5.4xlarge"
+    Description: "EC2 instance type for worker nodes"
+    
+  WorkerCount:
+    Type: Number
+    Default: 8
+    MinValue: 1
+    MaxValue: 50
+    Description: "Number of worker nodes (default 8 for 9-node total)"
+    
+  Ec2KeyName:
+    Type: "AWS::EC2::KeyPair::KeyName"
+    Description: "Name of an existing EC2 KeyPair for SSH access"
+    
+  SubnetId:
+    Type: "AWS::EC2::Subnet::Id"
+    Description: "Subnet ID for cluster deployment"
+    
+  S3LogBucket:
+    Type: String
+    Description: "S3 bucket for logs (e.g., s3://my-bucket/emr-logs/)"
+    Default: ""
+    
+  S3DataBucket:
+    Type: String
+    Description: "S3 bucket for TPC-DS data (e.g., s3://my-bucket/tpcds/)"
+    
+  UseSpotInstances:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: "Use spot instances for worker nodes (reduces cost ~70%)"
+    
+  SpotBidPercentage:
+    Type: Number
+    Default: 100
+    MinValue: 0
+    MaxValue: 100
+    Description: "Bid percentage for spot instances (100% = on-demand price)"
+
+# Mappings for region-specific AMIs
+Mappings:
+  RegionMap:
+    us-east-1:
+      AMI: "ami-0c02fb55956c7d316"
+    us-west-2:
+      AMI: "ami-0c2f4b1f3e7e4f8e3"
+    eu-west-1:
+      AMI: "ami-0d1e2e3f4a5b6c7d8"
+
+# Resources
+Resources:
+  # EMR Cluster
+  EMRCluster:
+    Type: "AWS::EMR::Cluster"
+    Properties:
+      Name: !Ref ClusterName
+      ReleaseLabel: !Ref EmrRelease
+      LogUri: !Ref S3LogBucket
+      Applications:
+        - Name: "Spark"
+        - Name: "Hive"
+        - Name: "Hadoop"
+        - Name: "Tez"
+        - Name: "Ganglia"
+        - Name: "Zeppelin"
+        
+      Configurations:
+        # Spark configuration
+        - Classification: "spark"
+          Properties:
+            maximizeResourceAllocation: "true"
+            
+        - Classification: "spark-defaults"
+          Properties:
+            spark.serializer: "org.apache.spark.serializer.KryoSerializer"
+            spark.kryoserializer.buffer.max: "512m"
+            spark.kryoserializer.buffer: "64m"
+            spark.kryo.registrationRequired: "false"
+            spark.kryo.referenceTracking: "false"
+            spark.kryo.unsafe: "true"
+            spark.executor.memory: "40g"
+            spark.executor.cores: "4"
+            spark.executor.instances: !Ref WorkerCount
+            spark.driver.memory: "50g"
+            spark.dynamicAllocation.enabled: "false"
+            spark.sql.shuffle.partitions: "400"
+            spark.sql.adaptive.enabled: "true"
+            spark.sql.adaptive.coalescePartitions.enabled: "true"
+            spark.sql.adaptive.advisoryPartitionSizeInBytes: "256MB"
+            spark.network.timeout: "800s"
+            spark.executor.heartbeatInterval: "60s"
+            
+        - Classification: "spark-env"
+          Configurations:
+            - Classification: "export"
+              Properties:
+                SPARK_DAEMON_MEMORY: "2g"
+                SPARK_WORKER_MEMORY: "40g"
+                SPARK_WORKER_CORES: "4"
+                
+        # Hive configuration
+        - Classification: "hive-site"
+          Properties:
+            hive.metastore.client.factory.class: "com.amazonaws.glue.catalog.metastore.AWSGlueDataCatalogHiveClientFactory"
+            hive.metastore.warehouse.dir: !Sub "${S3DataBucket}/warehouse/"
+            
+        # Hadoop configuration for S3
+        - Classification: "core-site"
+          Properties:
+            fs.s3a.impl: "org.apache.hadoop.fs.s3a.S3AFileSystem"
+            fs.s3a.connection.maximum: "100"
+            fs.s3a.fast.upload: "true"
+            fs.s3a.fast.upload.buffer: "disk"
+            fs.s3a.multipart.size: "100M"
+            
+        # Compression settings
+        - Classification: "hdfs-site"
+          Properties:
+            dfs.replication: "3"
+            dfs.blocksize: "134217728"  # 128MB
+            
+      Instances:
+        MasterInstanceGroup:
+          Name: "Master"
+          InstanceRole: "MASTER"
+          InstanceType: !Ref MasterInstanceType
+          InstanceCount: 1
+          Market: "ON_DEMAND"
+          EbsConfiguration:
+            EbsBlockDeviceConfigs:
+              - VolumeSpecification:
+                  VolumeType: "gp3"
+                  SizeInGB: 100
+                VolumesPerInstance: 1
+                
+        CoreInstanceGroup:
+          Name: "Core"
+          InstanceRole: "CORE"
+          InstanceType: !Ref WorkerInstanceType
+          InstanceCount: !Ref WorkerCount
+          Market: !If [UseSpotInstancesCondition, "SPOT", "ON_DEMAND"]
+          BidPrice: !If [UseSpotInstancesCondition, !Sub "${SpotBidPercentage}% of OnDemandPrice", ""]
+          EbsConfiguration:
+            EbsBlockDeviceConfigs:
+              - VolumeSpecification:
+                  VolumeType: "gp3"
+                  SizeInGB: 100
+                VolumesPerInstance: 1
+                
+      JobFlowRole: !Ref EmrEc2InstanceProfile
+      ServiceRole: !Ref EmrServiceRole
+      VisibleToAllUsers: true
+      Tags:
+        - Key: "Project"
+          Value: "KryoSerializationBenchmark"
+        - Key: "Environment"
+          Value: "Research"
+          
+  # IAM Roles
+  EmrServiceRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: "elasticmapreduce.amazonaws.com"
+            Action: "sts:AssumeRole"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AmazonElasticMapReduceRole"
+      Policies:
+        - PolicyName: "EMRPassRole"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action: "iam:PassRole"
+                Resource: "*"
+                
+  EmrEc2Role:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: "ec2.amazonaws.com"
+            Action: "sts:AssumeRole"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AmazonElasticMapReduceforEC2Role"
+        - "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+        - "arn:aws:iam::aws:policy/CloudWatchFullAccess"
+        
+  EmrEc2InstanceProfile:
+    Type: "AWS::IAM::InstanceProfile"
+    Properties:
+      Roles:
+        - !Ref EmrEc2Role
+        
+  # Security Group
+  EmrSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: "Security group for EMR cluster"
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: "tcp"
+          FromPort: 22
+          ToPort: 22
+          CidrIp: "0.0.0.0/0"
+          Description: "SSH access"
+        - IpProtocol: "tcp"
+          FromPort: 8088
+          ToPort: 8088
+          CidrIp: "0.0.0.0/0"
+          Description: "YARN ResourceManager UI"
+        - IpProtocol: "tcp"
+          FromPort: 4040
+          ToPort: 4040
+          CidrIp: "0.0.0.0/0"
+          Description: "Spark UI"
+        - IpProtocol: "tcp"
+          FromPort: 9090
+          ToPort: 9090
+          CidrIp: "0.0.0.0/0"
+          Description: "Prometheus metrics"
+          
+  # S3 Bucket for results (if not existing)
+  ResultsBucket:
+    Type: "AWS::S3::Bucket"
+    Properties:
+      BucketName: !Sub "kryo-benchmark-results-${AWS::AccountId}"
+      LifecycleConfiguration:
+        Rules:
+          - Status: "Enabled"
+            ExpirationInDays: 30
+            Prefix: "temp/"
+      Tags:
+        - Key: "Project"
+          Value: "KryoSerializationBenchmark"
+
+# Conditions
+Conditions:
+  UseSpotInstancesCondition: !Equals [!Ref UseSpotInstances, "true"]
+
+# Outputs
+Outputs:
+  ClusterId:
+    Description: "EMR Cluster ID"
+    Value: !Ref EMRCluster
+    
+  ClusterMasterDNS:
+    Description: "Master node public DNS"
+    Value: !GetAtt EMRCluster.MasterPublicDNS
+    
+  ResultsBucket:
+    Description: "S3 bucket for results"
+    Value: !Ref ResultsBucket
+    
+  SparkUI:
+    Description: "Spark UI URL"
+    Value: !Sub "http://${EMRCluster.MasterPublicDNS}:8088"
+    
+  JmxPort:
+    Description: "JMX metrics port"
+    Value: "9092"

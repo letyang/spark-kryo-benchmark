@@ -1,0 +1,7 @@
+configuration,normalized_time
+java_baseline,100.0
+full_adaptive,61.6
+no_buffer,71.2
+no_compression,69.8
+no_registration,66.4
+no_adaptivity,68.3

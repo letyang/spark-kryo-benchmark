@@ -1,0 +1,25 @@
+# Ignore results (these will come from experiments)
+results/raw/
+results/analysis/
+
+# Ignore temporary files
+*.tmp
+*.log
+*.aux
+*.DS_Store
+Thumbs.db
+
+# Ignore credentials
+*.pem
+*key*
+*secret*
+.aws/
+
+# Ignore IDE files
+.vscode/
+.idea/
+*.swp
+
+# Ignore compiled files
+*.class
+*.pyc

@@ -1,0 +1,58 @@
+{
+  "Parameters": [
+    {
+      "ParameterKey": "ClusterName",
+      "ParameterValue": "kryo-benchmark-cluster"
+    },
+    {
+      "ParameterKey": "EmrRelease",
+      "ParameterValue": "emr-6.15.0"
+    },
+    {
+      "ParameterKey": "MasterInstanceType",
+      "ParameterValue": "m5.4xlarge"
+    },
+    {
+      "ParameterKey": "WorkerInstanceType",
+      "ParameterValue": "m5.4xlarge"
+    },
+    {
+      "ParameterKey": "WorkerCount",
+      "ParameterValue": "8"
+    },
+    {
+      "ParameterKey": "Ec2KeyName",
+      "ParameterValue": "your-key-pair-name"
+    },
+    {
+      "ParameterKey": "SubnetId",
+      "ParameterValue": "subnet-xxxxxxxx"
+    },
+    {
+      "ParameterKey": "S3LogBucket",
+      "ParameterValue": "s3://your-bucket/emr-logs/"
+    },
+    {
+      "ParameterKey": "S3DataBucket",
+      "ParameterValue": "s3://your-bucket/tpcds/"
+    },
+    {
+      "ParameterKey": "UseSpotInstances",
+      "ParameterValue": "false"
+    },
+    {
+      "ParameterKey": "SpotBidPercentage",
+      "ParameterValue": "100"
+    }
+  ],
+  "Tags": [
+    {
+      "Key": "Project",
+      "Value": "KryoSerializationBenchmark"
+    },
+    {
+      "Key": "Environment",
+      "Value": "Research"
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "spark.serializer": "org.apache.spark.serializer.KryoSerializer",
+  "spark.kryo.registrator": "com.example.AdaptiveRegistrator",
+  "spark.kryo.registrationRequired": "true",
+  "spark.kryo.referenceTracking": "false",
+  "spark.kryo.unsafe": "true",
+  
+  "adaptive.enabled": "true",
+  "adaptive.buffer.dynamic": "true",
+  "adaptive.buffer.min": "64m",
+  "adaptive.buffer.max": "1g",
+  "adaptive.buffer.step": "64m",
+  
+  "adaptive.compression.dynamic": "true",
+  "adaptive.compression.shuffle.threshold": "10GB",
+  "adaptive.compression.checkpoint.threshold": "5GB",
+  
+  "adaptive.monitoring.interval": "5min",
+  "adaptive.monitoring.metrics": "shuffle_bytes,serialization_time,gc_time,memory_pressure",
+  
+  "adaptive.rules.shuffle_heavy": "buffer_max=1g,compression=zstd,shuffle_partitions=800",
+  "adaptive.rules.scan_heavy": "buffer_max=128m,compression=lz4,shuffle_partitions=200",
+  "adaptive.rules.aggregate_heavy": "buffer_max=256m,compression=lz4,shuffle_partitions=400",
+  "adaptive.rules.window_heavy": "buffer_max=512m,compression=lz4,memory_fraction=0.5",
+  "adaptive.rules.mixed_complex": "buffer_max=384m,compression=adaptive",
+  
+  "spark.shuffle.compress": "true",
+  "spark.shuffle.compress.codec": "lz4",
+  "spark.io.compression.codec": "zstd",
+  "spark.io.compression.zstd.level": "3",
+  "spark.checkpoint.compress": "true",
+  "spark.checkpoint.compress.codec": "zstd",
+  "spark.rdd.compress": "true",
+  
+  "spark.sql.adaptive.enabled": "true",
+  "spark.sql.adaptive.coalescePartitions.enabled": "true",
+  "spark.sql.adaptive.advisoryPartitionSizeInBytes": "256MB",
+  "spark.sql.adaptive.skewJoin.enabled": "true",
+  "spark.sql.autoBroadcastJoinThreshold": "104857600",
+  "spark.sql.shuffle.partitions": "400",
+  
+  "spark.executor.memory": "40g",
+  "spark.executor.cores": "4",
+  "spark.executor.instances": "8",
+  "spark.driver.memory": "50g",
+  "spark.dynamicAllocation.enabled": "true",
+  "spark.dynamicAllocation.minExecutors": "4",
+  "spark.dynamicAllocation.maxExecutors": "16",
+  "spark.dynamicAllocation.initialExecutors": "8",
+  
+  "spark.memory.fraction": "0.6",
+  "spark.memory.storageFraction": "0.3",
+  "spark.memory.offHeap.enabled": "true",
+  "spark.memory.offHeap.size": "10g"
+}

@@ -1,0 +1,177 @@
+# jmx_exporter_config.yaml - Prometheus JMX Exporter configuration for Kryo metrics
+# Used to expose Kryo serialization metrics to Prometheus for monitoring
+# 
+# Usage with Spark:
+#   spark-submit \
+#     --conf spark.executor.extraJavaOptions="-javaagent:jmx_prometheus_javaagent.jar=9090:config.yaml" \
+#     ...
+
+---
+# Start delay before exporting metrics (seconds)
+startDelaySeconds: 0
+
+# JMX connection settings
+hostPort: localhost:9092
+username: 
+password: 
+ssl: false
+
+# Lowercase output names for Prometheus compatibility
+lowercaseOutputName: true
+lowercaseOutputLabelNames: true
+
+# Whitelist - only export these metrics (improves performance)
+whitelistObjectNames:
+  - "com.esotericsoftware.kryo:type=Kryo,*"
+  - "java.lang:type=Memory"
+  - "java.lang:type=GarbageCollector,*"
+  - "org.apache.spark:type=StreamingQuery,*"
+  - "org.apache.spark.sql:type=QueryExecution,*"
+  - "java.lang:type=OperatingSystem"
+
+# Blacklist - exclude these metrics (reduce noise)
+blacklistObjectNames:
+  - "java.lang:type=Threading"
+  - "java.lang:type=ClassLoading"
+
+# Rules for transforming JMX metrics to Prometheus format
+rules:
+
+  #############################################################
+  # Kryo Serialization Metrics (CUSTOM)
+  #############################################################
+  
+  # Kryo buffer metrics
+  - pattern: "com.esotericsoftware.kryo<type=Kryo><>(bufferCapacity|bufferUsed|objectCount)"
+    name: "kryo_$1_bytes"
+    help: "Kryo $1 in bytes"
+    type: GAUGE
+  
+  # Kryo registration metrics
+  - pattern: "com.esotericsoftware.kryo<type=Kryo><>(registrationHits|registrationMisses)"
+    name: "kryo_registration_$1_total"
+    help: "Total Kryo registration $1"
+    type: COUNTER
+  
+  # Kryo timing metrics
+  - pattern: "com.esotericsoftware.kryo<type=Kryo><>(serializationTime|deserializationTime)"
+    name: "kryo_$1_milliseconds_total"
+    help: "Total Kryo $1 in milliseconds"
+    type: COUNTER
+  
+  # Kryo compression ratio
+  - pattern: "com.esotericsoftware.kryo<type=Kryo><>compressionRatio"
+    name: "kryo_compression_ratio"
+    help: "Kryo compression ratio (original_size / compressed_size)"
+    type: GAUGE
+
+  #############################################################
+  # JVM Memory Metrics
+  #############################################################
+  
+  # Heap and Non-Heap memory usage
+  - pattern: "java.lang<type=Memory><>(HeapMemoryUsage|NonHeapMemoryUsage)"
+    name: "jvm_memory_$1_bytes"
+    help: "JVM memory usage in bytes"
+    type: GAUGE
+    labels:
+      area: "$1"
+  
+  # Memory pool usage
+  - pattern: "java.lang<type=MemoryPool,name=(.*)><>Usage"
+    name: "jvm_memory_pool_bytes"
+    help: "JVM memory pool usage in bytes"
+    type: GAUGE
+    labels:
+      pool: "$1"
+  
+  # Pending finalization count
+  - pattern: "java.lang<type=Memory><>ObjectPendingFinalizationCount"
+    name: "jvm_memory_pending_finalization_count"
+    help: "Number of objects pending finalization"
+    type: GAUGE
+
+  #############################################################
+  # JVM Garbage Collection Metrics
+  #############################################################
+  
+  # GC count and time
+  - pattern: "java.lang<type=GarbageCollector,name=(.*)><>(CollectionCount|CollectionTime)"
+    name: "jvm_gc_$1_$2"
+    help: "JVM garbage collector $1 $2"
+    type: GAUGE
+    labels:
+      gc: "$1"
+
+  #############################################################
+  # Operating System Metrics
+  #############################################################
+  
+  # CPU and load metrics
+  - pattern: "java.lang<type=OperatingSystem><>ProcessCpuLoad"
+    name: "jvm_os_process_cpu_load"
+    help: "JVM process CPU load"
+    type: GAUGE
+  
+  - pattern: "java.lang<type=OperatingSystem><>SystemLoadAverage"
+    name: "jvm_os_system_load_average"
+    help: "JVM system load average"
+    type: GAUGE
+  
+  - pattern: "java.lang<type=OperatingSystem><>AvailableProcessors"
+    name: "jvm_os_available_processors"
+    help: "Number of available processors"
+    type: GAUGE
+
+  #############################################################
+  # Spark Metrics (if available)
+  #############################################################
+  
+  # Spark streaming query progress
+  - pattern: "org.apache.spark<type=StreamingQuery,name=(.*)><>lastProgress"
+    name: "spark_streaming_query_last_progress"
+    help: "Spark streaming query last progress"
+    type: GAUGE
+    labels:
+      query: "$1"
+  
+  # Spark query execution duration
+  - pattern: "org.apache.spark.sql<type=QueryExecution,name=(.*)><>duration"
+    name: "spark_query_execution_duration_milliseconds"
+    help: "Spark query execution duration in milliseconds"
+    type: GAUGE
+    labels:
+      query: "$1"
+
+  #############################################################
+  # Fallback rule - capture any numeric attributes (last resort)
+  #############################################################
+  
+  - pattern: ".*"
+    name: "jmx_$1_$2"
+    help: "Generic JMX metric"
+    type: GAUGE
+    attrNameSnakeCase: true
+
+#############################################################
+# How to use this file with Spark:
+#############################################################
+#
+# 1. Download jmx_prometheus_javaagent.jar from:
+#    https://github.com/prometheus/jmx_exporter
+#
+# 2. Launch Spark with the Java agent:
+#    spark-submit \
+#      --conf spark.executor.extraJavaOptions="-javaagent:jmx_prometheus_javaagent.jar=9090:jmx_exporter_config.yaml" \
+#      --conf spark.driver.extraJavaOptions="-javaagent:jmx_prometheus_javaagent.jar=9091:jmx_exporter_config.yaml" \
+#      your_application.jar
+#
+# 3. Prometheus can now scrape metrics from:
+#    - Driver: http://driver-host:9091/metrics
+#    - Executor: http://executor-host:9090/metrics
+#
+# 4. Add to prometheus.yml:
+#    scrape_configs:
+#      - job_name: 'spark_kryo'
+#        static_configs:
+#          - targets: ['driver-host:9091', 'executor-host:9090']
