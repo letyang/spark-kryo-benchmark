@@ -49,7 +49,7 @@ This repository contains all materials to reproduce the experiments described in
 
 ```bash
 # 1. Clone repository
-git clone https://letyang/spark-kryo-benchmark
+git clone https://github.com/letyang/spark-kryo-benchmark
 cd spark-kryo-benchmark
 
 # 2. Deploy EMR cluster (requires AWS credentials)
