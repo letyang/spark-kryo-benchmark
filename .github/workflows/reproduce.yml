@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  # Job 1: Validate all configuration files (NO AWS NEEDED)
+  # Job 1: Validate configuration files
   validate-configs:
     name: Validate Configuration Files
     runs-on: ubuntu-latest
@@ -41,11 +41,17 @@ jobs:
           done
           echo "All JSON files are valid!"
       
-      - name: Validate YAML files (syntax only)
+      - name: Validate YAML files (syntax only - NO AWS)
         run: |
           echo "Validating YAML files..."
           pip install pyyaml
-          for file in cloudformation/*.yaml monitoring/conf/*.yaml; do
+          for file in cloudformation/*.yaml; do
+            if [ -f "$file" ]; then
+              python3 -c "import yaml; yaml.safe_load(open('$file'))"
+              echo "    ✓ $file is valid YAML"
+            fi
+          done
+          for file in monitoring/conf/*.yaml; do
             if [ -f "$file" ]; then
               python3 -c "import yaml; yaml.safe_load(open('$file'))"
               echo "    ✓ $file is valid YAML"
@@ -61,7 +67,7 @@ jobs:
             exit 1
           fi
 
-  # Job 2: Validate script syntax
+  # Job 2: Validate Python and Shell scripts
   validate-scripts:
     name: Validate Script Syntax
     runs-on: ubuntu-latest
@@ -131,7 +137,7 @@ jobs:
             [ -f "$file" ] && echo "  ✓ $file" || { echo "  ✗ $file missing"; MISSING=1; }
           done
           
-          # Results files (optional)
+          # Results files
           for file in results/*.csv; do
             [ -f "$file" ] && echo "  ✓ $file" || echo "  ⚠ $file missing (optional)"
           done
@@ -149,7 +155,7 @@ jobs:
         run: |
           TOTAL_FILES=$(find . -type f -not -path "./.git/*" | wc -l)
           echo "Total files in repository: $TOTAL_FILES"
-          echo "✅ Repository check complete"
+          echo "✅ Repository structure check complete"
 
   # Job 4: Final status
   final-status:
