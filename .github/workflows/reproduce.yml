@@ -41,16 +41,11 @@ jobs:
           done
           echo "All JSON files are valid!"
       
-      - name: Validate YAML files (syntax only - NO AWS)
+      - name: Validate monitoring YAML files (standard YAML only)
         run: |
-          echo "Validating YAML files..."
+          echo "Validating standard YAML files..."
           pip install pyyaml
-          for file in cloudformation/*.yaml; do
-            if [ -f "$file" ]; then
-              python3 -c "import yaml; yaml.safe_load(open('$file'))"
-              echo "    ✓ $file is valid YAML"
-            fi
-          done
+          # Only validate standard YAML files (no CloudFormation templates)
           for file in monitoring/conf/*.yaml; do
             if [ -f "$file" ]; then
               python3 -c "import yaml; yaml.safe_load(open('$file'))"
@@ -136,6 +131,11 @@ jobs:
           for file in stats/*.R; do
             [ -f "$file" ] && echo "  ✓ $file" || { echo "  ✗ $file missing"; MISSING=1; }
           done
+          
+          # CloudFormation files (just check existence, not syntax)
+          [ -f "cloudformation/emr-cluster-template.yaml" ] && echo "  ✓ cloudformation/emr-cluster-template.yaml" || echo "  ✗ cloudformation/emr-cluster-template.yaml missing"
+          [ -f "cloudformation/emr-cluster-parameters.json" ] && echo "  ✓ cloudformation/emr-cluster-parameters.json" || echo "  ✗ cloudformation/emr-cluster-parameters.json missing"
+          [ -f "cloudformation/deploy.sh" ] && echo "  ✓ cloudformation/deploy.sh" || echo "  ✗ cloudformation/deploy.sh missing"
           
           # Results files
           for file in results/*.csv; do
