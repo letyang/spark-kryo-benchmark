@@ -6,16 +6,6 @@
   "spark.kryo.registrationRequired": "true",
   "spark.kryo.referenceTracking": "false",
   "spark.kryo.unsafe": "true",
-  "spark.kryo.classesToRegister": [
-    "org.apache.spark.sql.catalyst.expressions.UnsafeRow",
-    "org.apache.spark.sql.execution.columnar.CachedBatch",
-    "scala.collection.immutable.Map$SerializationProxy",
-    "scala.collection.immutable.List",
-    "scala.Tuple2",
-    "scala.Tuple3",
-    "java.util.HashMap",
-    "java.util.ArrayList"
-  ],
   "spark.shuffle.compress": "true",
   "spark.shuffle.compress.codec": "lz4",
   "spark.io.compression.codec": "zstd",
